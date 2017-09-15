@@ -4,7 +4,7 @@
 
 ### Simulation 
 
-[![CarND-Controls-MPC in Simulator](https://www.youtube.com/upload_thumbnail?v=XDN3H4yX0uc&t=hqdefault&ts=1505489719304)](https://youtu.be/XDN3H4yX0uc)
+<iframe width="854" height="480" src="https://www.youtube.com/embed/XDN3H4yX0uc" frameborder="0" allowfullscreen></iframe>
 
 ### The Model
 
