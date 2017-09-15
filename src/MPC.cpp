@@ -6,8 +6,22 @@
 using CppAD::AD;
 
 // TODO: Set the timestep length and duration
-size_t N = 0;
-double dt = 0;
+double latency = 0.1; // 100 milliseconds
+size_t N = 15;
+double dt = 0.05;
+int skip_steps = 2;
+double ref_v = 60;
+
+size_t x_start = 0;
+size_t y_start = x_start + N;
+size_t psi_start = y_start + N;
+size_t v_start = psi_start + N;
+size_t cte_start = v_start + N;
+size_t epsi_start = cte_start + N;
+size_t delta_start = epsi_start + N;
+size_t a_start = delta_start + N - 1;
+
+double polyeval(Eigen::VectorXd coeffs, double x);
 
 // This value assumes the model presented in the classroom is used.
 //
@@ -33,6 +47,33 @@ class FG_eval {
     // `fg` a vector of the cost constraints, `vars` is a vector of variable values (state & actuators)
     // NOTE: You'll probably go back and forth between this function and
     // the Solver function below.
+    // The cost is stored as the first element of `fg`.
+    // Any additions to the cost should be added to `fg[0]`.
+    fg[0] = 0;
+
+    // Reference State Cost
+    // TODO: Define the cost related the reference state and
+    // any anything you think may be beneficial.
+    for (int t = 0; t < N; t++)
+    {
+      fg[0] += CppAD::pow(vars[cte_start + t], 2);
+      fg[0] += CppAD::pow(vars[epsi_start + t], 2);
+      fg[0] += CppAD::pow(vars[v_start + t] - ref_v, 2);
+    }
+
+    // Minimize the use of actuators.
+    for (int t = 0; t < N - 1; t++)
+    {
+      fg[0] += 100 * CppAD::pow(vars[delta_start + t], 2);
+      fg[0] += CppAD::pow(vars[a_start + t], 2);
+    }
+
+    // Minimize the value gap between sequential actuations.
+    for (int t = 0; t < N - 2; t++)
+    {
+      fg[0] += 500 * CppAD::pow(vars[delta_start + t + 1] - vars[delta_start + t], 2);
+      fg[0] += CppAD::pow(vars[a_start + t + 1] - vars[a_start + t], 2);
+    }
   }
 };
 
