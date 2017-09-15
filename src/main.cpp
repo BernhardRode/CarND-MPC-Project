@@ -17,25 +17,34 @@ constexpr double pi() { return M_PI; }
 double deg2rad(double x) { return x * pi() / 180; }
 double rad2deg(double x) { return x * 180 / pi(); }
 
+const double dt = 0.08;
+const double Lf = 2.67;
+
 // Checks if the SocketIO event has JSON data.
 // If there is data the JSON object in string format will be returned,
 // else the empty string "" will be returned.
-string hasData(string s) {
+string hasData(string s)
+{
   auto found_null = s.find("null");
   auto b1 = s.find_first_of("[");
   auto b2 = s.rfind("}]");
-  if (found_null != string::npos) {
+  if (found_null != string::npos)
+  {
     return "";
-  } else if (b1 != string::npos && b2 != string::npos) {
+  }
+  else if (b1 != string::npos && b2 != string::npos)
+  {
     return s.substr(b1, b2 - b1 + 2);
   }
   return "";
 }
 
 // Evaluate a polynomial.
-double polyeval(Eigen::VectorXd coeffs, double x) {
+double polyeval(Eigen::VectorXd coeffs, double x)
+{
   double result = 0.0;
-  for (int i = 0; i < coeffs.size(); i++) {
+  for (int i = 0; i < coeffs.size(); i++)
+  {
     result += coeffs[i] * pow(x, i);
   }
   return result;
@@ -45,17 +54,21 @@ double polyeval(Eigen::VectorXd coeffs, double x) {
 // Adapted from
 // https://github.com/JuliaMath/Polynomials.jl/blob/master/src/Polynomials.jl#L676-L716
 Eigen::VectorXd polyfit(Eigen::VectorXd xvals, Eigen::VectorXd yvals,
-                        int order) {
+                        int order)
+{
   assert(xvals.size() == yvals.size());
   assert(order >= 1 && order <= xvals.size() - 1);
   Eigen::MatrixXd A(xvals.size(), order + 1);
 
-  for (int i = 0; i < xvals.size(); i++) {
+  for (int i = 0; i < xvals.size(); i++)
+  {
     A(i, 0) = 1.0;
   }
 
-  for (int j = 0; j < xvals.size(); j++) {
-    for (int i = 0; i < order; i++) {
+  for (int j = 0; j < xvals.size(); j++)
+  {
+    for (int i = 0; i < order; i++)
+    {
       A(j, i + 1) = A(j, i) * xvals(j);
     }
   }
@@ -65,7 +78,8 @@ Eigen::VectorXd polyfit(Eigen::VectorXd xvals, Eigen::VectorXd yvals,
   return result;
 }
 
-int main() {
+int main()
+{
   uWS::Hub h;
 
   // MPC is initialized here!
@@ -78,12 +92,15 @@ int main() {
     // The 2 signifies a websocket event
     string sdata = string(data).substr(0, length);
     cout << sdata << endl;
-    if (sdata.size() > 2 && sdata[0] == '4' && sdata[1] == '2') {
+    if (sdata.size() > 2 && sdata[0] == '4' && sdata[1] == '2')
+    {
       string s = hasData(sdata);
-      if (s != "") {
+      if (s != "")
+      {
         auto j = json::parse(s);
         string event = j[0].get<string>();
-        if (event == "telemetry") {
+        if (event == "telemetry")
+        {
           // j[1] is the data JSON object
           vector<double> ptsx = j[1]["ptsx"];
           vector<double> ptsy = j[1]["ptsy"];
@@ -98,18 +115,46 @@ int main() {
           * Both are in between [-1, 1].
           *
           */
-          double steer_value;
-          double throttle_value;
+          double throttle_value = j[1]["throttle"];
+          double steer_value = j[1]["steering_angle"];
+
+          Eigen::VectorXd ptsx_transform(ptsx.size());
+          Eigen::VectorXd ptsy_transform(ptsx.size());
+
+          for (int i = 0; i < ptsx.size(); i++)
+          {
+            double shift_x = ptsx[i] - px;
+            double shift_y = ptsy[i] - py;
+            ptsx_transform[i] = shift_x * cos(-psi) - shift_y * sin(-psi);
+            ptsy_transform[i] = shift_x * sin(-psi) + shift_y * cos(-psi);
+          } // px = 0, py = 0 , psi = 0
+
+          auto coeffs = polyfit(ptsx_transform, ptsy_transform, 3);
+          double epsi = 0 - atan(coeffs[1]);
+          double cte = coeffs[0];
+
+          //Latency predict at t+1
+          double px_mod = v * dt;
+          double py_mod = 0;
+          double psi_mod = -(v / Lf) * steer_value * dt;
+          double v_mod = v + throttle_value * dt;
+          double cte_mod = cte + v * sin(epsi) * dt;
+          double epsi_mod = epsi + (v / Lf) * -steer_value * dt;
+
+          Eigen::VectorXd state(6);
+          state << px_mod, py_mod, psi_mod, v_mod, cte_mod, epsi_mod;
+
+          auto vars = mpc.Solve(state, coeffs);
 
           json msgJson;
           // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
           // Otherwise the values will be in between [-deg2rad(25), deg2rad(25] instead of [-1, 1].
-          msgJson["steering_angle"] = steer_value;
-          msgJson["throttle"] = throttle_value;
+          msgJson["steering_angle"] = -vars[0] / deg2rad(25);
+          msgJson["throttle"] = vars[1];
 
-          //Display the MPC predicted trajectory 
-          vector<double> mpc_x_vals;
-          vector<double> mpc_y_vals;
+          //Display the MPC predicted trajectory
+          vector<double> mpc_x_vals = mpc.N_x;
+          vector<double> mpc_y_vals = mpc.N_y;
 
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Green line
@@ -121,12 +166,17 @@ int main() {
           vector<double> next_x_vals;
           vector<double> next_y_vals;
 
+          for (int i = 0; i < ptsx_transform.size(); i++)
+          {
+            next_x_vals.push_back(ptsx_transform[i]);
+            next_y_vals.push_back(ptsy_transform[i]);
+          }
+
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Yellow line
 
           msgJson["next_x"] = next_x_vals;
           msgJson["next_y"] = next_y_vals;
-
 
           auto msg = "42[\"steer\"," + msgJson.dump() + "]";
           std::cout << msg << std::endl;
@@ -142,7 +192,9 @@ int main() {
           this_thread::sleep_for(chrono::milliseconds(100));
           ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
         }
-      } else {
+      }
+      else
+      {
         // Manual driving
         std::string msg = "42[\"manual\",{}]";
         ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
@@ -156,9 +208,12 @@ int main() {
   h.onHttpRequest([](uWS::HttpResponse *res, uWS::HttpRequest req, char *data,
                      size_t, size_t) {
     const std::string s = "<h1>Hello world!</h1>";
-    if (req.getUrl().valueLength == 1) {
+    if (req.getUrl().valueLength == 1)
+    {
       res->end(s.data(), s.length());
-    } else {
+    }
+    else
+    {
       // i guess this should be done more gracefully?
       res->end(nullptr, 0);
     }
@@ -175,9 +230,12 @@ int main() {
   });
 
   int port = 4567;
-  if (h.listen(port)) {
+  if (h.listen(port))
+  {
     std::cout << "Listening to port " << port << std::endl;
-  } else {
+  }
+  else
+  {
     std::cerr << "Failed to listen to port" << std::endl;
     return -1;
   }

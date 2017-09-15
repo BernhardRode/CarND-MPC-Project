@@ -6,8 +6,12 @@
 
 using namespace std;
 
-class MPC {
- public:
+class MPC
+{
+public:
+  vector<double> N_x;
+  vector<double> N_y;
+
   MPC();
 
   virtual ~MPC();

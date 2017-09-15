@@ -6,11 +6,8 @@
 using CppAD::AD;
 
 // TODO: Set the timestep length and duration
-double latency = 0.1; // 100 milliseconds
-size_t N = 15;
-double dt = 0.05;
-int skip_steps = 2;
-double ref_v = 60;
+size_t N = 12;
+double dt = 0.08;
 
 size_t x_start = 0;
 size_t y_start = x_start + N;
@@ -20,8 +17,6 @@ size_t cte_start = v_start + N;
 size_t epsi_start = cte_start + N;
 size_t delta_start = epsi_start + N;
 size_t a_start = delta_start + N - 1;
-
-double polyeval(Eigen::VectorXd coeffs, double x);
 
 // This value assumes the model presented in the classroom is used.
 //
@@ -34,15 +29,18 @@ double polyeval(Eigen::VectorXd coeffs, double x);
 //
 // This is the length from front to CoG that has a similar radius.
 const double Lf = 2.67;
+const double ref_v = 70;
 
-class FG_eval {
- public:
+class FG_eval
+{
+public:
   // Fitted polynomial coefficients
   Eigen::VectorXd coeffs;
   FG_eval(Eigen::VectorXd coeffs) { this->coeffs = coeffs; }
 
   typedef CPPAD_TESTVECTOR(AD<double>) ADvector;
-  void operator()(ADvector& fg, const ADvector& vars) {
+  void operator()(ADvector &fg, const ADvector &vars)
+  {
     // TODO: implement MPC
     // `fg` a vector of the cost constraints, `vars` is a vector of variable values (state & actuators)
     // NOTE: You'll probably go back and forth between this function and
@@ -51,28 +49,61 @@ class FG_eval {
     // Any additions to the cost should be added to `fg[0]`.
     fg[0] = 0;
 
-    // Reference State Cost
-    // TODO: Define the cost related the reference state and
-    // any anything you think may be beneficial.
-    for (int t = 0; t < N; t++)
+    for (int i = 0; i < N; i++)
     {
-      fg[0] += CppAD::pow(vars[cte_start + t], 2);
-      fg[0] += CppAD::pow(vars[epsi_start + t], 2);
-      fg[0] += CppAD::pow(vars[v_start + t] - ref_v, 2);
+      fg[0] += 20.0 * CppAD::pow(vars[cte_start + i], 2);
+      fg[0] += 1.0 * CppAD::pow(vars[epsi_start + i], 2);
+      fg[0] += 1.0 * CppAD::pow(vars[v_start + i] - ref_v, 2);
     }
 
-    // Minimize the use of actuators.
-    for (int t = 0; t < N - 1; t++)
+    for (int i = 0; i < N - 1; i++)
     {
-      fg[0] += 100 * CppAD::pow(vars[delta_start + t], 2);
-      fg[0] += CppAD::pow(vars[a_start + t], 2);
+      fg[0] += 200.0 * CppAD::pow(vars[delta_start + i], 2);
+      fg[0] += 20.0 * CppAD::pow(vars[a_start + i], 2);
     }
 
-    // Minimize the value gap between sequential actuations.
-    for (int t = 0; t < N - 2; t++)
+    for (int i = 0; i < N - 2; i++)
     {
-      fg[0] += 500 * CppAD::pow(vars[delta_start + t + 1] - vars[delta_start + t], 2);
-      fg[0] += CppAD::pow(vars[a_start + t + 1] - vars[a_start + t], 2);
+      fg[0] += 2000.0 * CppAD::pow(vars[delta_start + i + 1] - vars[delta_start + i], 2);
+      fg[0] += 20.0 * CppAD::pow(vars[a_start + i + 1] - vars[a_start + i], 2);
+    }
+
+    fg[1 + x_start] = vars[x_start];
+    fg[1 + y_start] = vars[y_start];
+    fg[1 + psi_start] = vars[psi_start];
+    fg[1 + v_start] = vars[v_start];
+    fg[1 + cte_start] = vars[cte_start];
+    fg[1 + epsi_start] = vars[epsi_start];
+
+    for (int i = 1; i < N; i++)
+    {
+      // The state at time t+1 .
+      AD<double> x1 = vars[x_start + i];
+      AD<double> y1 = vars[y_start + i];
+      AD<double> psi1 = vars[psi_start + i];
+      AD<double> v1 = vars[v_start + i];
+      AD<double> cte1 = vars[cte_start + i];
+      AD<double> epsi1 = vars[epsi_start + i];
+
+      AD<double> x0 = vars[x_start + i - 1];
+      AD<double> y0 = vars[y_start + i - 1];
+      AD<double> psi0 = vars[psi_start + i - 1];
+      AD<double> v0 = vars[v_start + i - 1];
+      AD<double> cte0 = vars[cte_start + i - 1];
+      AD<double> epsi0 = vars[epsi_start + i - 1];
+
+      AD<double> delta0 = vars[delta_start + i - 1];
+      AD<double> a0 = vars[a_start + i - 1];
+
+      AD<double> f0 = coeffs[0] + coeffs[1] * x0 + coeffs[2] * CppAD::pow(x0, 2) + coeffs[3] * CppAD::pow(x0, 3);
+      AD<double> psides0 = CppAD::atan(coeffs[1] + 2 * coeffs[2] * x0 + 3 * coeffs[3] * CppAD::pow(x0, 2));
+
+      fg[1 + x_start + i] = x1 - (x0 + v0 * CppAD::cos(psi0) * dt);
+      fg[1 + y_start + i] = y1 - (y0 + v0 * CppAD::sin(psi0) * dt);
+      fg[1 + psi_start + i] = psi1 - (psi0 + v0 * delta0 / Lf * dt);
+      fg[1 + v_start + i] = v1 - (v0 + a0 * dt);
+      fg[1 + cte_start + i] = cte1 - ((f0 - y0) + (v0 * CppAD::sin(epsi0) * dt));
+      fg[1 + epsi_start + i] = epsi1 - ((psi0 - psides0) - (v0 * delta0 / Lf * dt));
     }
   }
 };
@@ -83,9 +114,9 @@ class FG_eval {
 MPC::MPC() {}
 MPC::~MPC() {}
 
-vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
+vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs)
+{
   bool ok = true;
-  size_t i;
   typedef CPPAD_TESTVECTOR(double) Dvector;
 
   // TODO: Set the number of model variables (includes both states and inputs).
@@ -93,29 +124,70 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   // element vector and there are 10 timesteps. The number of variables is:
   //
   // 4 * 10 + 2 * 9
-  size_t n_vars = 0;
+  size_t n_vars = N * 6 + (N - 1) * 2;
   // TODO: Set the number of constraints
-  size_t n_constraints = 0;
+  size_t n_constraints = N * 6;
 
   // Initial value of the independent variables.
   // SHOULD BE 0 besides initial state.
   Dvector vars(n_vars);
-  for (int i = 0; i < n_vars; i++) {
-    vars[i] = 0;
+  for (int i = 0; i < n_vars; i++)
+  {
+    vars[i] = 0.0;
   }
+
+  double x = vars[x_start] = state[0];
+  double y = vars[y_start] = state[1];
+  double psi = vars[psi_start] = state[2];
+  double v = vars[v_start] = state[3];
+  double cte = vars[cte_start] = state[4];
+  double epsi = vars[epsi_start] = state[5];
 
   Dvector vars_lowerbound(n_vars);
   Dvector vars_upperbound(n_vars);
   // TODO: Set lower and upper limits for variables.
 
+  for (int i = 0; i < delta_start; i++)
+  {
+    vars_lowerbound[i] = -1.0e19;
+    vars_upperbound[i] = 1.0e19;
+  }
+
+  for (int i = delta_start; i < a_start; i++)
+  {
+    vars_lowerbound[i] = -0.44;
+    vars_upperbound[i] = 0.44;
+  }
+
+  for (int i = a_start; i < n_vars; i++)
+  {
+    vars_lowerbound[i] = -1.0;
+    vars_upperbound[i] = 1.0;
+  }
+
   // Lower and upper limits for the constraints
   // Should be 0 besides initial state.
-  Dvector constraints_lowerbound(n_constraints);
-  Dvector constraints_upperbound(n_constraints);
-  for (int i = 0; i < n_constraints; i++) {
-    constraints_lowerbound[i] = 0;
-    constraints_upperbound[i] = 0;
+  Dvector lb_constraints(n_constraints);
+  Dvector up_constraints(n_constraints);
+  for (int i = 0; i < n_constraints; i++)
+  {
+    lb_constraints[i] = 0;
+    up_constraints[i] = 0;
   }
+
+  lb_constraints[x_start] = x;
+  lb_constraints[y_start] = y;
+  lb_constraints[psi_start] = psi;
+  lb_constraints[v_start] = v;
+  lb_constraints[cte_start] = cte;
+  lb_constraints[epsi_start] = epsi;
+
+  up_constraints[x_start] = x;
+  up_constraints[y_start] = y;
+  up_constraints[psi_start] = psi;
+  up_constraints[v_start] = v;
+  up_constraints[cte_start] = cte;
+  up_constraints[epsi_start] = epsi;
 
   // object that computes objective and constraints
   FG_eval fg_eval(coeffs);
@@ -143,8 +215,14 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
 
   // solve the problem
   CppAD::ipopt::solve<Dvector, FG_eval>(
-      options, vars, vars_lowerbound, vars_upperbound, constraints_lowerbound,
-      constraints_upperbound, fg_eval, solution);
+      options,
+      vars,
+      vars_lowerbound,
+      vars_upperbound,
+      lb_constraints,
+      up_constraints,
+      fg_eval,
+      solution);
 
   // Check some of the solution values
   ok &= solution.status == CppAD::ipopt::solve_result<Dvector>::success;
@@ -158,5 +236,20 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   //
   // {...} is shorthand for creating a vector, so auto x1 = {1.0,2.0}
   // creates a 2 element double vector.
-  return {};
+
+  N_x.clear();
+  N_y.clear();
+
+  for (int i = 0; i < N; i++)
+  {
+    N_x.push_back(solution.x[x_start + i]);
+    N_y.push_back(solution.x[y_start + i]);
+  }
+
+  vector<double> result = {
+      solution.x[delta_start],
+      solution.x[a_start],
+      solution.x[cte_start + 1],
+      solution.x[v_start + 1]};
+  return result;
 }
