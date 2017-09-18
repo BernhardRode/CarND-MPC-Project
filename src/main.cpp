@@ -17,7 +17,7 @@ constexpr double pi() { return M_PI; }
 double deg2rad(double x) { return x * pi() / 180; }
 double rad2deg(double x) { return x * 180 / pi(); }
 
-const double dt = 0.08;
+const double dt = 0.10;
 const double Lf = 2.67;
 
 // Checks if the SocketIO event has JSON data.
@@ -119,7 +119,7 @@ int main()
           double steer_value = j[1]["steering_angle"];
 
           Eigen::VectorXd ptsx_transform(ptsx.size());
-          Eigen::VectorXd ptsy_transform(ptsx.size());
+          Eigen::VectorXd ptsy_transform(ptsy.size());
 
           for (int i = 0; i < ptsx.size(); i++)
           {
@@ -131,55 +131,59 @@ int main()
 
           auto coeffs = polyfit(ptsx_transform, ptsy_transform, 3);
           double epsi = 0 - atan(coeffs[1]);
-          double cte = coeffs[0];
+          double cte = polyeval(coeffs, 0);
 
           //Latency predict at t+1
-          double px_mod = v * dt;
-          double py_mod = 0;
-          double psi_mod = -(v / Lf) * steer_value * dt;
-          double v_mod = v + throttle_value * dt;
-          double cte_mod = cte + v * sin(epsi) * dt;
-          double epsi_mod = epsi + (v / Lf) * -steer_value * dt;
+          //Predicted car's state after latency transcurred
+          // x, y and psi are all zero after transformation above
+          double pred_px = 0.0 + v * dt; // Since psi is zero, cos(0) = 1
+          const double pred_py = 0.0;    // Since sin(0) = 0, (y + v * 0 * dt)
+          double pred_psi = 0.0 + v * -steer_value / Lf * dt;
+          double pred_v = v + throttle_value * dt;
+          double pred_cte = cte + v * sin(epsi) * dt;
+          double pred_epsi = epsi + v * -steer_value / Lf * dt;
 
           Eigen::VectorXd state(6);
-          state << px_mod, py_mod, psi_mod, v_mod, cte_mod, epsi_mod;
+          // x, y, theta, v, cte, epsi
+          state << pred_px, pred_py, pred_psi, pred_v, pred_cte, pred_epsi;
 
           auto vars = mpc.Solve(state, coeffs);
 
           json msgJson;
           // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
           // Otherwise the values will be in between [-deg2rad(25), deg2rad(25] instead of [-1, 1].
-          msgJson["steering_angle"] = -vars[0] / deg2rad(25);
+          msgJson["steering_angle"] = vars[0] / (deg2rad(25) * Lf);
           msgJson["throttle"] = vars[1];
 
           //Display the MPC predicted trajectory
-          vector<double> mpc_x_vals = mpc.N_x;
-          vector<double> mpc_y_vals = mpc.N_y;
+          vector<double> mpc_x_vals = {state[0]};
+          vector<double> mpc_y_vals = {state[1]};
 
-          //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
-          // the points in the simulator are connected by a Green line
+          for (int i = 2; i < vars.size(); i += 2)
+          {
+            mpc_x_vals.push_back(vars[i]);
+            mpc_y_vals.push_back(vars[i + 1]);
+          }
 
           msgJson["mpc_x"] = mpc_x_vals;
           msgJson["mpc_y"] = mpc_y_vals;
-
-          //Display the waypoints/reference line
           vector<double> next_x_vals;
           vector<double> next_y_vals;
 
-          for (int i = 0; i < ptsx_transform.size(); i++)
-          {
-            next_x_vals.push_back(ptsx_transform[i]);
-            next_y_vals.push_back(ptsy_transform[i]);
-          }
+          int num_points = 25;
+          double poly_inc = 2.5;
 
-          //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
-          // the points in the simulator are connected by a Yellow line
+          for (int i = 1; i < num_points; i++)
+          {
+            next_x_vals.push_back(poly_inc * i);
+            next_y_vals.push_back(polyeval(coeffs, poly_inc * i));
+          }
 
           msgJson["next_x"] = next_x_vals;
           msgJson["next_y"] = next_y_vals;
 
           auto msg = "42[\"steer\"," + msgJson.dump() + "]";
-          std::cout << msg << std::endl;
+          // std::cout << msg << std::endl;
           // Latency
           // The purpose is to mimic real driving conditions where
           // the car does actuate the commands instantly.

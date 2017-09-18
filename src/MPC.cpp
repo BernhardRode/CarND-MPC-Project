@@ -6,8 +6,8 @@
 using CppAD::AD;
 
 // TODO: Set the timestep length and duration
-size_t N = 12;
-double dt = 0.08;
+size_t N = 10;
+double dt = 0.1;
 
 size_t x_start = 0;
 size_t y_start = x_start + N;
@@ -29,7 +29,7 @@ size_t a_start = delta_start + N - 1;
 //
 // This is the length from front to CoG that has a similar radius.
 const double Lf = 2.67;
-const double ref_v = 70;
+double ref_v = 70;
 
 class FG_eval
 {
@@ -51,8 +51,8 @@ public:
 
     for (int i = 0; i < N; i++)
     {
-      fg[0] += 20.0 * CppAD::pow(vars[cte_start + i], 2);
-      fg[0] += 1.0 * CppAD::pow(vars[epsi_start + i], 2);
+      fg[0] += 500.0 * CppAD::pow(vars[cte_start + i], 2); //150
+      fg[0] += 100.0 * CppAD::pow(vars[epsi_start + i], 2);
       fg[0] += 1.0 * CppAD::pow(vars[v_start + i] - ref_v, 2);
     }
 
@@ -62,9 +62,10 @@ public:
       fg[0] += 20.0 * CppAD::pow(vars[a_start + i], 2);
     }
 
+    // Minimize the value gap between sequential actuations.
     for (int i = 0; i < N - 2; i++)
     {
-      fg[0] += 2000.0 * CppAD::pow(vars[delta_start + i + 1] - vars[delta_start + i], 2);
+      fg[0] += 2500.0 * CppAD::pow(vars[delta_start + i + 1] - vars[delta_start + i], 2);
       fg[0] += 20.0 * CppAD::pow(vars[a_start + i + 1] - vars[a_start + i], 2);
     }
 
@@ -100,10 +101,10 @@ public:
 
       fg[1 + x_start + i] = x1 - (x0 + v0 * CppAD::cos(psi0) * dt);
       fg[1 + y_start + i] = y1 - (y0 + v0 * CppAD::sin(psi0) * dt);
-      fg[1 + psi_start + i] = psi1 - (psi0 + v0 * delta0 / Lf * dt);
+      fg[1 + psi_start + i] = psi1 - (psi0 - v0 * delta0 / Lf * dt);
       fg[1 + v_start + i] = v1 - (v0 + a0 * dt);
       fg[1 + cte_start + i] = cte1 - ((f0 - y0) + (v0 * CppAD::sin(epsi0) * dt));
-      fg[1 + epsi_start + i] = epsi1 - ((psi0 - psides0) - (v0 * delta0 / Lf * dt));
+      fg[1 + epsi_start + i] = epsi1 - ((psi0 - psides0) - (v0 / Lf) * delta0 * dt);
     }
   }
 };
@@ -119,7 +120,7 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs)
   bool ok = true;
   typedef CPPAD_TESTVECTOR(double) Dvector;
 
-  // TODO: Set the number of model variables (includes both states and inputs).
+  // Set the number of model variables (includes both states and inputs).
   // For example: If the state is a 4 element vector, the actuators is a 2
   // element vector and there are 10 timesteps. The number of variables is:
   //
@@ -236,20 +237,16 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs)
   //
   // {...} is shorthand for creating a vector, so auto x1 = {1.0,2.0}
   // creates a 2 element double vector.
+  vector<double> result;
 
-  N_x.clear();
-  N_y.clear();
+  result.push_back(solution.x[delta_start]);
+  result.push_back(solution.x[a_start]);
 
-  for (int i = 0; i < N; i++)
+  for (int i = 0; i < N - 1; i++)
   {
-    N_x.push_back(solution.x[x_start + i]);
-    N_y.push_back(solution.x[y_start + i]);
+    result.push_back(solution.x[x_start + i + 1]);
+    result.push_back(solution.x[y_start + i + 1]);
   }
 
-  vector<double> result = {
-      solution.x[delta_start],
-      solution.x[a_start],
-      solution.x[cte_start + 1],
-      solution.x[v_start + 1]};
   return result;
 }
